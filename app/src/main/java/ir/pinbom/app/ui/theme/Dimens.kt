@@ -66,17 +66,17 @@ object Dimens {
     val touch: Dp = 48.dp
 
     /** Small circular icon button. */
-    val iconButton = 40.dp
+    val iconButton = 36.dp
 
     /** Icon button that must not shift layout inside dense rows. */
-    val iconButtonSmall = 32.dp
+    val iconButtonSmall = 28.dp
 
     /** Pill button heights. */
-    val button = 48.dp
-    val buttonSmall = 36.dp
+    val button = 42.dp
+    val buttonSmall = 32.dp
 
     /** Chip height. */
-    val chip = 36.dp
+    val chip = 32.dp
 
     /** Board row cover. */
     val boardThumb = 56.dp

@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.launch
 import ir.pinbom.app.R
 import ir.pinbom.app.data.SessionManager
 import ir.pinbom.app.data.remote.Board
@@ -548,6 +549,7 @@ private fun AuthorRow(pin: Pin, baseUrl: String, onClick: () -> Unit) {
     ) {
         Avatar(
             name = name.ifBlank { fallback },
+            url = pin.author_avatar_url.ifBlank { null },
             baseUrl = baseUrl,
             size = 44.dp,
         )
@@ -624,7 +626,7 @@ private fun CommentRow(comment: Comment, baseUrl: String) {
             .fillMaxWidth()
             .padding(horizontal = Dimens.screen, vertical = Dimens.sm),
     ) {
-        Avatar(name = author, baseUrl = baseUrl, size = 36.dp)
+        Avatar(name = author, url = comment.user.avatar_url.ifBlank { null }, baseUrl = baseUrl, size = 36.dp)
         Spacer(Modifier.width(Dimens.md))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -678,7 +680,7 @@ private fun CommentComposer(value: String, onValueChange: (String) -> Unit, onSe
 /* ── Save sheet ───────────────────────────────────────────────────────────── */
 
 @Composable
-private fun SaveSheet(
+internal fun SaveSheet(
     boards: List<Board>,
     hint: String,
     baseUrl: String,
@@ -733,28 +735,80 @@ private fun SaveSheet(
 
 @Composable
 private fun ImageViewer(pin: Pin, baseUrl: String, onDismiss: () -> Unit) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val heightPx = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.height.toFloat()
     var scale by remember { mutableStateOf(1f) }
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
+    var leaving by remember { mutableStateOf(false) }
+
+    val zoomed = scale > 1.02f
+    /* The backdrop thins out as the picture is pulled away: the gesture reads as
+     * “letting go of the photo”, not as a hidden button. */
+    val fade = (1f - kotlin.math.abs(offsetY) / (heightPx * 0.45f)).coerceIn(0.15f, 1f)
+
+    fun animateTo(target: Float, get: () -> Float, set: (Float) -> Unit, spec: androidx.compose.animation.core.AnimationSpec<Float>, done: () -> Unit = {}) {
+        scope.launch {
+            androidx.compose.animation.core.Animatable(get()).animateTo(target, spec) { set(value) }
+            done()
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(PinBomTheme.colors.scrim)
+            .background(PinBomTheme.colors.scrim.let { it.copy(alpha = it.alpha * fade) })
+            /* Pull down (or up) to close — only while the photo is at rest size, so
+             * panning a zoomed photo never closes it by accident. */
+            .pointerInput(zoomed) {
+                if (zoomed) return@pointerInput
+                androidx.compose.foundation.gestures.detectVerticalDragGestures(
+                    onVerticalDrag = { change, amount ->
+                        if (!leaving) {
+                            change.consume()
+                            offsetY += amount
+                        }
+                    },
+                    onDragEnd = {
+                        if (kotlin.math.abs(offsetY) > heightPx * 0.16f && !leaving) {
+                            leaving = true
+                            val target = if (offsetY > 0f) heightPx else -heightPx
+                            animateTo(
+                                target, { offsetY }, { offsetY = it },
+                                tween(durationMillis = 220, easing = Motion.standard),
+                            ) { onDismiss() }
+                        } else {
+                            animateTo(0f, { offsetY }, { offsetY = it }, Motion.layoutSpring)
+                        }
+                    },
+                    onDragCancel = { animateTo(0f, { offsetY }, { offsetY = it }, Motion.layoutSpring) },
+                )
+            }
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 5f)
-                    if (scale > 1f) {
+                    val next = (scale * zoom).coerceIn(1f, 5f)
+                    scale = next
+                    if (next > 1.02f) {
                         offsetX += pan.x
                         offsetY += pan.y
-                    } else {
+                    } else if (zoom != 1f) {
                         offsetX = 0f
-                        offsetY = 0f
                     }
                 }
             }
             .pointerInput(Unit) {
-                detectTapGestures(onTap = { onDismiss() })
+                detectTapGestures(
+                    onTap = { if (!leaving) onDismiss() },
+                    onDoubleTap = {
+                        /* One quick zoom in, the next one back out. */
+                        val target = if (scale > 1.02f) 1f else 2.5f
+                        animateTo(target, { scale }, { scale = it }, tween(Motion.medium, easing = Motion.emphasized))
+                        if (target == 1f) {
+                            animateTo(0f, { offsetX }, { offsetX = it }, tween(Motion.medium, easing = Motion.emphasized))
+                            animateTo(0f, { offsetY }, { offsetY = it }, tween(Motion.medium, easing = Motion.emphasized))
+                        }
+                    },
+                )
             },
     ) {
         AsyncImage(
@@ -777,7 +831,8 @@ private fun ImageViewer(pin: Pin, baseUrl: String, onDismiss: () -> Unit) {
             onClick = onDismiss,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(Dimens.xl),
+                .padding(Dimens.xl)
+                .graphicsLayer { alpha = fade },
             containerColor = PinBomTheme.colors.surface,
         )
     }

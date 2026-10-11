@@ -196,6 +196,8 @@ fun PinCard(
             ) {
                 Avatar(
                     name = pin.author?.display_name,
+                    url = pin.author_avatar_url.ifBlank { null },
+                    baseUrl = baseUrl,
                     size = 20.dp,
                     modifier = if (onAuthorClick != null) {
                         Modifier.clickable(onClick = onAuthorClick)
@@ -328,8 +330,8 @@ fun PinQuickActions(
                         ),
                     )
                 }
-                actions.forEach { action ->
-                    QuickActionRow(action = action)
+                actions.forEachIndexed { index, action ->
+                    QuickActionRow(action = action, index = index)
                 }
             }
         }
@@ -337,11 +339,22 @@ fun PinQuickActions(
 }
 
 @Composable
-private fun QuickActionRow(action: PinQuickAction) {
+private fun QuickActionRow(action: PinQuickAction, index: Int = 0) {
     val colors = PinBomTheme.colors
+    /* Rows arrive one after another, 40ms apart: a small rise + fade that makes
+     * the bubble feel like it is unfolding rather than appearing. */
+    val enter = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(60L + index * 40L)
+        enter.animateTo(1f, tween(Motion.medium, easing = Motion.emphasized))
+    }
     val tint = if (action.destructive) MaterialTheme.colorScheme.error else colors.textPrimary
     Row(
         modifier = Modifier
+            .graphicsLayer {
+                alpha = enter.value
+                translationY = (1f - enter.value) * 10.dp.toPx()
+            }
             .fillMaxWidth()
             .height(Dimens.touch)
             .clickable(onClick = action.onClick)

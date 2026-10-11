@@ -22,7 +22,7 @@ import javax.inject.Singleton
     suspend fun verifyOtp(id:String,code:String){val t=api.verifyOtp(OtpVerifyRequest(id,code));session.setTokens(t.accessToken,t.refreshToken)}
     suspend fun pin(id:Long)=api.pin(id)
     suspend fun feed(kind:String,cursor:String="")=when(kind){"following"->api.following(cursor);"trending"->api.trending(cursor);else->api.home(cursor)}
-    suspend fun cache(page:FeedPage){db.pinDao().upsertAll(page.items.map{PinEntity(it.id,it.title,it.description,it.image_url,it.width,it.height,it.author?.display_name.orEmpty(),it.created_at)})}
+    suspend fun cache(page:FeedPage){db.pinDao().upsertAll(page.items.map{PinEntity(it.id,it.title,it.description,it.image_url,it.width,it.height,it.author?.display_name.orEmpty(),it.created_at,it.author_avatar_url)})}
     fun cachedPins():Flow<List<PinEntity>> = db.pinDao().observe()
     suspend fun search(q:String,cursor:String="")=api.search(q,"pins",cursor)
     suspend fun searchUsers(q:String,cursor:String="")=api.searchUsers(q,"users",cursor)

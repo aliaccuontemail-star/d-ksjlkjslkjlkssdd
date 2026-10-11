@@ -94,16 +94,16 @@ data class PinBomTextStyles(
 fun pinbomTextStyles(language: AppLanguage): PinBomTextStyles {
     val family = pinbomFontFamily(language)
     return PinBomTextStyles(
-        display = pinbomText(family, 32, 40, FontWeight.Bold, -0.2),
-        headline = pinbomText(family, 28, 36, FontWeight.Bold, -0.2),
-        titleLarge = pinbomText(family, 22, 30, FontWeight.Bold, -0.1),
-        title = pinbomText(family, 18, 26, FontWeight.SemiBold),
-        pinTitle = pinbomText(family, 14, 20, FontWeight.SemiBold),
-        body = pinbomText(family, 16, 26, FontWeight.Normal),
-        bodySmall = pinbomText(family, 14, 22, FontWeight.Normal),
-        caption = pinbomText(family, 12, 18, FontWeight.Medium),
-        micro = pinbomText(family, 11, 16, FontWeight.Medium),
-        button = pinbomText(family, 15, 20, FontWeight.Bold),
+        display = pinbomText(family, 28, 36, FontWeight.Bold, -0.2),
+        headline = pinbomText(family, 24, 32, FontWeight.Bold, -0.2),
+        titleLarge = pinbomText(family, 19, 26, FontWeight.Bold, -0.1),
+        title = pinbomText(family, 16, 22, FontWeight.SemiBold),
+        pinTitle = pinbomText(family, 12, 18, FontWeight.SemiBold),
+        body = pinbomText(family, 14, 22, FontWeight.Normal),
+        bodySmall = pinbomText(family, 13, 20, FontWeight.Normal),
+        caption = pinbomText(family, 11, 16, FontWeight.Medium),
+        micro = pinbomText(family, 10, 14, FontWeight.Medium),
+        button = pinbomText(family, 13, 18, FontWeight.Bold),
     )
 }
 
@@ -133,11 +133,11 @@ fun PinBomTypography(language: AppLanguage): Typography {
     val styles = pinbomTextStyles(language)
     val family = pinbomFontFamily(language)
     return Typography(
-        displayLarge = pinbomText(family, 40, 48, FontWeight.Bold, -0.4),
-        displayMedium = pinbomText(family, 36, 44, FontWeight.Bold, -0.3),
+        displayLarge = pinbomText(family, 34, 42, FontWeight.Bold, -0.4),
+        displayMedium = pinbomText(family, 31, 38, FontWeight.Bold, -0.3),
         displaySmall = styles.display,
 
-        headlineLarge = pinbomText(family, 30, 38, FontWeight.Bold, -0.2),
+        headlineLarge = pinbomText(family, 26, 34, FontWeight.Bold, -0.2),
         headlineMedium = styles.headline,
         headlineSmall = styles.titleLarge,
 
@@ -147,7 +147,7 @@ fun PinBomTypography(language: AppLanguage): Typography {
 
         bodyLarge = styles.body,
         bodyMedium = styles.bodySmall,
-        bodySmall = pinbomText(family, 13, 20, FontWeight.Normal),
+        bodySmall = pinbomText(family, 12, 18, FontWeight.Normal),
 
         labelLarge = styles.button,
         labelMedium = styles.caption,

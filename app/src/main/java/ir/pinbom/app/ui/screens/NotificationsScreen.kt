@@ -1,5 +1,11 @@
 package ir.pinbom.app.ui.screens
 
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -127,23 +133,47 @@ fun NotificationsScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(Dimens.xxs),
                 ) {
-                    items(items = items, key = { it.id }, contentType = { "notification" }) { item ->
-                        NotificationRow(
-                            item = item,
-                            baseUrl = session.baseUrl,
-                            onOpen = {
-                                val handle = item.actor?.username.orEmpty()
-                                when {
-                                    item.pin_id > 0 -> nav.navigate(Routes.pin(item.pin_id))
-                                    handle.isNotBlank() -> nav.navigate(Routes.profile(handle))
-                                }
-                            },
-                        )
+                    val fresh = items.filter { !it.read }
+                    val earlier = items.filter { it.read }
+                    val open: (Notification) -> Unit = { item ->
+                        val handle = item.actor?.username.orEmpty()
+                        when {
+                            item.pin_id > 0 -> nav.navigate(Routes.pin(item.pin_id))
+                            handle.isNotBlank() -> nav.navigate(Routes.profile(handle))
+                        }
+                    }
+                    if (fresh.isNotEmpty()) {
+                        item(key = "h-new", contentType = "header") {
+                            NotificationSection(stringResource(R.string.notif_section_new))
+                        }
+                        items(items = fresh, key = { it.id }, contentType = { "notification" }) { item ->
+                            NotificationRow(item = item, baseUrl = session.baseUrl, onOpen = { open(item) })
+                        }
+                    }
+                    if (earlier.isNotEmpty()) {
+                        if (fresh.isNotEmpty()) {
+                            item(key = "h-earlier", contentType = "header") {
+                                NotificationSection(stringResource(R.string.notif_section_earlier))
+                            }
+                        }
+                        items(items = earlier, key = { it.id }, contentType = { "notification" }) { item ->
+                            NotificationRow(item = item, baseUrl = session.baseUrl, onOpen = { open(item) })
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun NotificationSection(title: String) {
+    Text(
+        text = title,
+        style = PinBomText.caption,
+        color = PinBomTheme.colors.textSecondary,
+        modifier = Modifier.padding(start = Dimens.md, end = Dimens.md, top = Dimens.md, bottom = Dimens.xs),
+    )
 }
 
 /* ── Row ──────────────────────────────────────────────────────────────────── */
@@ -157,6 +187,20 @@ private fun NotificationRow(item: Notification, baseUrl: String, onOpen: () -> U
     val name = item.actor?.display_name.orEmpty().ifBlank { handle }.ifBlank { fallback }
     val hasTarget = item.pin_id > 0 || handle.isNotBlank()
 
+    /* The server only writes a body for comments; likes, saves and follows
+     * arrive empty. The sentence is therefore built here, per type, in the
+     * app's language — that is what the row used to be missing. */
+    val action = when (item.type) {
+        "like" -> stringResource(R.string.notif_like)
+        "save" -> stringResource(R.string.notif_save)
+        "comment" -> stringResource(R.string.notif_comment)
+        "follow" -> stringResource(R.string.notif_follow)
+        else -> item.body.ifBlank { stringResource(R.string.notif_generic) }
+    }
+    val kind = notificationKind(item.type, colors.primary)
+    val quote = if (item.type == "comment") item.body.trim() else ""
+    val pinTitle = item.pin_title.trim()
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -169,39 +213,109 @@ private fun NotificationRow(item: Notification, baseUrl: String, onOpen: () -> U
                 role = Role.Button,
             )
             .padding(horizontal = Dimens.md, vertical = Dimens.md),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
-        Avatar(
-            name = name,
-            baseUrl = baseUrl,
-            size = 44.dp,
-            ring = if (item.read) null else colors.primary,
-        )
+        /* The avatar carries a small badge for *what happened*, so the list can be
+         * scanned by colour and shape before a word is read. */
+        androidx.compose.foundation.layout.Box {
+            Avatar(
+                name = name,
+                url = item.actor?.avatar_url?.ifBlank { null },
+                baseUrl = baseUrl,
+                size = 44.dp,
+            )
+            if (kind != null) {
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 4.dp, y = 4.dp)
+                        .size(20.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(colors.background)
+                        .padding(2.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(kind.color),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = kind.icon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(10.dp),
+                    )
+                }
+            }
+        }
         Spacer(Modifier.width(Dimens.md))
         Column(Modifier.weight(1f)) {
-            ContentText(
-                text = name,
-                style = PinBomText.body,
-                color = colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(Dimens.xxs))
-            ContentText(
-                text = item.body,
+            Text(
+                text = androidx.compose.ui.text.buildAnnotatedString {
+                    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
+                    append(name)
+                    pop()
+                    append(" ")
+                    append(action)
+                },
                 style = PinBomText.bodySmall,
-                color = colors.textSecondary,
-                maxLines = 2,
+                color = colors.textPrimary,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (quote.isNotBlank()) {
+                Spacer(Modifier.height(Dimens.xs))
+                ContentText(
+                    text = quote,
+                    style = PinBomText.bodySmall,
+                    color = colors.textSecondary,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(PinBomShape.field)
+                        .background(colors.surface)
+                        .padding(horizontal = Dimens.md, vertical = Dimens.sm),
+                )
+            } else if (pinTitle.isNotBlank() && item.type != "follow") {
+                Spacer(Modifier.height(Dimens.xxs))
+                ContentText(
+                    text = pinTitle,
+                    style = PinBomText.caption,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             Spacer(Modifier.height(Dimens.xs))
-            RelativeTimeText(iso = item.created_at)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RelativeTimeText(iso = item.created_at)
+                if (!item.read) {
+                    Spacer(Modifier.width(Dimens.sm))
+                    BadgeDot(modifier = Modifier.semantics { contentDescription = unreadLabel })
+                }
+            }
         }
-        if (!item.read) {
-            Spacer(Modifier.width(Dimens.sm))
-            BadgeDot(modifier = Modifier.semantics { contentDescription = unreadLabel })
+        if (item.pin_image_url.isNotBlank()) {
+            Spacer(Modifier.width(Dimens.md))
+            ir.pinbom.app.ui.components.PinImage(
+                url = ir.pinbom.app.ui.components.imageUrl(baseUrl, item.pin_image_url),
+                seed = item.pin_id,
+                modifier = Modifier.size(Dimens.notificationThumb),
+                shape = PinBomShape.thumb,
+                contentDescription = null,
+            )
         }
     }
+}
+
+private class NotificationKind(val icon: androidx.compose.ui.graphics.vector.ImageVector, val color: Color)
+
+private fun notificationKind(type: String, brand: Color): NotificationKind? = when (type) {
+    "like" -> NotificationKind(androidx.compose.material.icons.Icons.Filled.Favorite, brand)
+    "save" -> NotificationKind(androidx.compose.material.icons.Icons.Filled.Bookmark, Color(0xFF2E7D6B))
+    "comment" -> NotificationKind(androidx.compose.material.icons.Icons.Filled.ChatBubble, Color(0xFF3B6FD4))
+    "follow" -> NotificationKind(androidx.compose.material.icons.Icons.Filled.PersonAdd, Color(0xFF8250C8))
+    else -> null
 }
 
 /* ── Loading ──────────────────────────────────────────────────────────────── */

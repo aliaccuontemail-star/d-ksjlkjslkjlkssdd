@@ -232,4 +232,17 @@
     <string name="setup_step_two">STEP 2 OF 2 · PERSONALIZE</string>
     <string name="setup_next">Continue</string>
     <string name="setup_back">Back</string>
+    <string name="search_clear">Clear</string>
+    <string name="search_trending_tags">Trending tags</string>
+    <string name="search_suggested_people">People to follow</string>
+    <string name="notif_channel_name">Activity</string>
+    <string name="notif_channel_desc">Likes, comments and new followers</string>
+    <string name="notif_title_fallback">PinBom</string>
+    <string name="notif_like">liked your pin</string>
+    <string name="notif_save">saved your pin</string>
+    <string name="notif_comment">commented on your pin</string>
+    <string name="notif_follow">started following you</string>
+    <string name="notif_generic">has new activity for you</string>
+    <string name="notif_section_new">New</string>
+    <string name="notif_section_earlier">Earlier</string>
 </resources>

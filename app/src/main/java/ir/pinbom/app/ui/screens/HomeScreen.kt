@@ -47,6 +47,15 @@ import android.widget.Toast
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
 import ir.pinbom.app.ui.PinActionViewModel
+import ir.pinbom.app.ui.BoardsViewModel
+import ir.pinbom.app.ui.components.PinBomChipRow
+import ir.pinbom.app.ui.components.PinBomDialog
+import ir.pinbom.app.ui.components.ContentTextField
+import ir.pinbom.app.ui.components.PrimaryPillButton
+import ir.pinbom.app.ui.components.imageUrl
+import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material3.Text
+import ir.pinbom.app.ui.theme.PinBomText
 import androidx.navigation.NavHostController
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -78,6 +87,9 @@ import ir.pinbom.app.ui.nav.Routes
 import ir.pinbom.app.ui.nav.sharedPinBounds
 import ir.pinbom.app.ui.theme.PinBomTheme
 import ir.pinbom.app.ui.theme.Dimens
+import ir.pinbom.app.ui.theme.Motion
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import ir.pinbom.app.work.UploadEvents
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -100,6 +112,16 @@ fun HomeScreen(
     val actionVm: PinActionViewModel = hiltViewModel()
     val scope = rememberCoroutineScope()
     var quickPin by remember { mutableStateOf<Pin?>(null) }
+    var savePin by remember { mutableStateOf<Pin?>(null) }
+    var newBoardDialog by remember { mutableStateOf(false) }
+    var newBoardTitle by remember { mutableStateOf("") }
+    val boardsVm: BoardsViewModel = hiltViewModel()
+    val boards by boardsVm.items.collectAsStateWithLifecycle()
+    val feedKind by vm.selectedKind.collectAsStateWithLifecycle()
+    val saveLabel = stringResource(R.string.action_save)
+    val savedToFmt = stringResource(R.string.pin_saved_to, "%1\$s")
+    val savedGeneric = stringResource(R.string.action_saved)
+    LaunchedEffect(savePin) { if (savePin != null) boardsVm.load() }
     val likedOverrides = remember { mutableStateMapOf<Long, Boolean>() }
     var quickLiked by remember { mutableStateOf(false) }
     var quickLikeBusy by remember { mutableStateOf(false) }
@@ -133,6 +155,18 @@ fun HomeScreen(
       Column(Modifier.fillMaxSize()) {
         HomeHeader(onSettings = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } })
 
+        val feedKinds = remember { listOf("home", "following", "trending") }
+        PinBomChipRow(
+            labels = listOf(
+                stringResource(R.string.feed_for_you),
+                stringResource(R.string.feed_following),
+                stringResource(R.string.feed_trending),
+            ),
+            selectedIndex = feedKinds.indexOf(feedKind).coerceAtLeast(0),
+            onSelect = { index -> feedKinds.getOrNull(index)?.let(vm::setKind) },
+            modifier = Modifier.fillMaxWidth().padding(bottom = Dimens.xs),
+        )
+
         OfflineBanner(
             visible = !online,
             onRetry = { feed.refresh() },
@@ -154,7 +188,7 @@ fun HomeScreen(
                 when {
                     /* Cached rows win over the skeleton: reopening the app offline
                      * shows the wall you already have, not a grey placeholder. */
-                    feed.itemCount == 0 && cachedPins.isNotEmpty() && (loading || failed) ->
+                    feed.itemCount == 0 && feedKind == "home" && cachedPins.isNotEmpty() && (loading || failed) ->
                         LazyVerticalStaggeredGrid(
                             columns = columns,
                             modifier = Modifier.fillMaxSize(),
@@ -214,7 +248,7 @@ fun HomeScreen(
       val activeQuickPin = quickPin
       if (activeQuickPin != null) {
           PinBomBottomSheet(onDismissRequest = { quickPin = null }) {
-              SheetHeader(title = activeQuickPin.title.ifBlank { moreLabel })
+              SheetHeader(title = activeQuickPin.title.ifBlank { moreLabel }, contentDirection = true)
               SecondaryPillButton(
                   text = stringResource(if (quickLiked) R.string.action_unlike else R.string.action_like),
                   onClick = {
@@ -240,6 +274,17 @@ fun HomeScreen(
               )
               Spacer(Modifier.height(Dimens.sm))
               SecondaryPillButton(
+                  text = saveLabel,
+                  onClick = {
+                      savePin = activeQuickPin
+                      quickPin = null
+                  },
+                  leadingIcon = Icons.Outlined.BookmarkAdd,
+                  fillWidth = true,
+                  size = PillButtonSize.Regular,
+              )
+              Spacer(Modifier.height(Dimens.sm))
+              SecondaryPillButton(
                   text = downloadLabel,
                   onClick = {
                       quickPin = null
@@ -250,6 +295,68 @@ fun HomeScreen(
                   size = PillButtonSize.Regular,
               )
               Spacer(Modifier.height(Dimens.xs))
+          }
+      }
+
+      val toSave = savePin
+      if (toSave != null) {
+          SaveSheet(
+              boards = boards,
+              hint = stringResource(R.string.pin_save_hint),
+              baseUrl = session.baseUrl,
+              coverUrl = imageUrl(session.baseUrl, toSave.image_url),
+              coverSeed = toSave.id,
+              onDismiss = { savePin = null },
+              onBoard = { board ->
+                  savePin = null
+                  scope.launch {
+                      val ok = actionVm.saveTo(toSave.id, board.id)
+                      Toast.makeText(
+                          context,
+                          if (ok) savedToFmt.replace("%1\$s", board.title) else likeError,
+                          Toast.LENGTH_SHORT,
+                      ).show()
+                  }
+              },
+              onNewBoard = { newBoardDialog = true },
+          )
+      }
+
+      if (newBoardDialog) {
+          PinBomDialog(onDismissRequest = { newBoardDialog = false }) {
+              Text(
+                  text = stringResource(R.string.pin_new_board),
+                  style = PinBomText.title,
+                  color = PinBomTheme.colors.textPrimary,
+              )
+              Spacer(Modifier.height(Dimens.md))
+              ContentTextField(
+                  value = newBoardTitle,
+                  onValueChange = { newBoardTitle = it },
+                  placeholder = stringResource(R.string.pin_board_name),
+                  modifier = Modifier.fillMaxWidth(),
+              )
+              Spacer(Modifier.height(Dimens.xl))
+              Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(Dimens.sm, Alignment.End),
+              ) {
+                  SecondaryPillButton(
+                      text = stringResource(R.string.action_cancel),
+                      onClick = { newBoardDialog = false },
+                      size = PillButtonSize.Small,
+                  )
+                  PrimaryPillButton(
+                      text = stringResource(R.string.action_done),
+                      enabled = newBoardTitle.isNotBlank(),
+                      onClick = {
+                          boardsVm.create(newBoardTitle, "")
+                          newBoardTitle = ""
+                          newBoardDialog = false
+                      },
+                      size = PillButtonSize.Small,
+                  )
+              }
           }
       }
     }
@@ -302,7 +409,17 @@ internal fun LazyStaggeredGridScope.pagedPins(
         contentType = feed.itemContentType { "pin" },
     ) { index ->
         feed[index]?.let { pin ->
-            PinQuickCard(pin = pin, baseUrl = baseUrl, onOpen = onPinClick, onMoreClick = onMoreClick)
+            PinQuickCard(
+                pin = pin,
+                baseUrl = baseUrl,
+                onOpen = onPinClick,
+                onMoreClick = onMoreClick,
+                modifier = Modifier.animateItem(
+                    fadeInSpec = tween(Motion.medium, easing = Motion.standard),
+                    placementSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
+                    fadeOutSpec = tween(Motion.short),
+                ),
+            )
         }
     }
     if (appending) {
@@ -320,7 +437,16 @@ internal fun LazyStaggeredGridScope.staticPins(
     onMoreClick: ((Pin) -> Unit)? = null,
 ) {
     items(items = pins, key = { it.id }, contentType = { "pin" }) { pin ->
-        PinQuickCard(pin = pin, baseUrl = baseUrl, onOpen = onPinClick, onMoreClick = onMoreClick)
+        PinQuickCard(
+            pin = pin,
+            baseUrl = baseUrl,
+            onOpen = onPinClick,
+            onMoreClick = onMoreClick,
+            modifier = Modifier.animateItem(
+                fadeInSpec = tween(Motion.medium, easing = Motion.standard),
+                placementSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
+            ),
+        )
     }
 }
 
@@ -331,11 +457,12 @@ internal fun PinQuickCard(
     baseUrl: String,
     onOpen: (Pin) -> Unit,
     onMoreClick: ((Pin) -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     PinCard(
         pin = pin,
         baseUrl = baseUrl,
-        modifier = Modifier.sharedPinBounds(pin.id),
+        modifier = modifier.sharedPinBounds(pin.id),
         showQuickActions = onMoreClick == null,
         onSaveClick = if (onMoreClick == null) ({ onOpen(pin) }) else null,
         onMoreClick = onMoreClick?.let { handler -> { handler(pin) } },
@@ -387,4 +514,5 @@ internal fun PinEntity.toPin(): Pin = Pin(
     created_at = createdAt,
     image_url = imageUrl,
     author = Author(username = "", display_name = authorName),
+    author_avatar_url = authorAvatar,
 )

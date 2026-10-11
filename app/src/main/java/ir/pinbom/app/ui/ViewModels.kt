@@ -36,6 +36,8 @@ import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -127,6 +129,56 @@ class SearchViewModel @Inject constructor(
 
     val users = MutableStateFlow<List<SearchUser>>(emptyList())
     val boards = MutableStateFlow<List<SearchBoard>>(emptyList())
+
+    /** Discovery shown while the field is empty. Built from the trending feed,
+     * so it needs no endpoint of its own. */
+    val trendingTags = MutableStateFlow<List<String>>(emptyList())
+    val suggestions = MutableStateFlow<List<SuggestedUser>>(emptyList())
+
+    init {
+        loadDiscover()
+    }
+
+    fun loadDiscover() {
+        viewModelScope.launch {
+            val page = runCatching { repo.feed("trending") }.getOrNull() ?: return@launch
+            trendingTags.value = page.items
+                .flatMap { it.tags }
+                .map { it.trim().trimStart('#') }
+                .filter { it.isNotBlank() }
+                .groupingBy { it.lowercase() }
+                .eachCount()
+                .entries
+                .sortedByDescending { it.value }
+                .take(8)
+                .map { it.key }
+            val names = page.items
+                .mapNotNull { it.author?.username }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .take(8)
+            val profiles = names
+                .map { name -> async { runCatching { repo.profile(name) }.getOrNull() } }
+                .awaitAll()
+                .filterNotNull()
+                .filter { !it.me }
+                .take(5)
+            suggestions.value = profiles.map { SuggestedUser(it) }
+        }
+    }
+
+    /** Optimistic follow from the suggestions list; rolls back on failure. */
+    fun followSuggestion(userId: Long) {
+        fun mark(done: Boolean) {
+            suggestions.value = suggestions.value.map {
+                if (it.profile.id == userId) it.copy(followed = done) else it
+            }
+        }
+        mark(true)
+        viewModelScope.launch {
+            runCatching { repo.follow(userId) }.onFailure { mark(false) }
+        }
+    }
 
     /** Additive UI state: boards/people lists show a skeleton while loading. */
     val secondaryBusy = MutableStateFlow(false)
@@ -505,6 +557,10 @@ class PinActionViewModel @Inject constructor(
             val result = if (currentlyLiked) repo.unlike(pinId) else repo.like(pinId)
             result.liked ?: !currentlyLiked
         }.getOrNull()
+
+    /** Saves [pinId] to [boardId] (or the default shelf when null). True on success. */
+    suspend fun saveTo(pinId: Long, boardId: Long?): Boolean =
+        runCatching { repo.save(pinId, boardId) }.isSuccess
 }
 
 @HiltViewModel
@@ -801,3 +857,8 @@ class UploadViewModel @Inject constructor(
         const val SUCCESS_VISIBLE_MS = 1_800L
     }
 }
+
+
+/** One row of “people to follow”. [followed] is local: the profile endpoint's
+ * follow flag is not used here, so a fresh tap is all this list ever shows. */
+data class SuggestedUser(val profile: UserProfile, val followed: Boolean = false)

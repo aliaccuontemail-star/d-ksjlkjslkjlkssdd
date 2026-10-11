@@ -5,6 +5,13 @@ import android.content.Context
 import android.os.SystemClock
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import ir.pinbom.app.work.ActivityPollWorker
+import java.util.concurrent.TimeUnit
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
@@ -41,6 +48,21 @@ class PinBomApplication : Application(), Configuration.Provider, SingletonImageL
         // carry the same data under the previous brand's names.
         StoreMigration.run(this)
         startedAt = SystemClock.uptimeMillis()
+        scheduleActivityPoll()
+    }
+
+    /** One periodic job for the whole install; KEEP leaves a running schedule alone. */
+    private fun scheduleActivityPoll() {
+        runCatching {
+            val request = PeriodicWorkRequestBuilder<ActivityPollWorker>(15, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                ActivityPollWorker.UNIQUE_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+        }
     }
 
     override val workManagerConfiguration: Configuration

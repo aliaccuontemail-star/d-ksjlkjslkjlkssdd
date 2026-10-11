@@ -57,8 +57,8 @@ import ir.pinbom.app.ui.theme.pressScale
  * ──────────────────────────────────────────────────────────────────────────── */
 
 enum class PillButtonSize(val height: Dp, val horizontalPadding: Dp) {
-    Regular(Dimens.button, 20.dp),
-    Small(Dimens.buttonSmall, 16.dp),
+    Regular(Dimens.button, 18.dp),
+    Small(Dimens.buttonSmall, 14.dp),
 }
 
 /** Brand red pill: “ذخیره”, “انتشار”, “دنبال کردن”, form submits. */
@@ -222,7 +222,7 @@ fun IconCircleButton(
     containerColor: Color? = null,
     contentColor: Color = PinBomTheme.colors.textPrimary,
     shape: Shape = CircleShape,
-    iconSize: Dp = 20.dp,
+    iconSize: Dp = 18.dp,
     badge: Boolean = false,
     badgeColor: Color = PinBomTheme.colors.primary,
     onLongClick: (() -> Unit)? = null,
@@ -287,7 +287,7 @@ private fun ButtonLabel(text: String, icon: ImageVector?, color: Color) {
                 imageVector = icon,
                 contentDescription = null,
                 tint = color,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(Dimens.sm))
         }

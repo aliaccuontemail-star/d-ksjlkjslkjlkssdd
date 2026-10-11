@@ -232,4 +232,17 @@
     <string name="setup_step_two">مرحله ۲ از ۲ · شخصی‌سازی</string>
     <string name="setup_next">ادامه</string>
     <string name="setup_back">قبلی</string>
+    <string name="search_clear">پاک کردن</string>
+    <string name="search_trending_tags">تگ‌های داغ</string>
+    <string name="search_suggested_people">افراد پیشنهادی</string>
+    <string name="notif_channel_name">فعالیت‌ها</string>
+    <string name="notif_channel_desc">لایک، نظر و دنبال‌کننده‌ی جدید</string>
+    <string name="notif_title_fallback">پین‌بام</string>
+    <string name="notif_like">پین تو را پسندید</string>
+    <string name="notif_save">پین تو را ذخیره کرد</string>
+    <string name="notif_comment">روی پین تو نظر گذاشت</string>
+    <string name="notif_follow">تو را دنبال کرد</string>
+    <string name="notif_generic">فعالیت تازه‌ای برایت داشت</string>
+    <string name="notif_section_new">تازه</string>
+    <string name="notif_section_earlier">قبلی‌ها</string>
 </resources>

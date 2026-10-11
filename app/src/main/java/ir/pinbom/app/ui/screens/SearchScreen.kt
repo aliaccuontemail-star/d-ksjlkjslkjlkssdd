@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -90,7 +91,10 @@ fun SearchScreen(
     val busy by vm.secondaryBusy.collectAsStateWithLifecycle()
     val online = rememberIsOnline()
 
-    val recents = remember { mutableStateListOf<String>() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val recents = remember { mutableStateListOf<String>().apply { addAll(ir.pinbom.app.data.RecentSearches.load(context)) } }
+    val tags by vm.trendingTags.collectAsStateWithLifecycle()
+    val suggestions by vm.suggestions.collectAsStateWithLifecycle()
     val requester = remember { FocusRequester() }
 
     LaunchedEffect(query, type) {
@@ -102,7 +106,8 @@ fun SearchScreen(
         if (text.isEmpty()) return
         recents.remove(text)
         recents.add(0, text)
-        while (recents.size > 6) recents.removeAt(recents.lastIndex)
+        while (recents.size > 8) recents.removeAt(recents.lastIndex)
+        ir.pinbom.app.data.RecentSearches.save(context, recents.toList())
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -139,6 +144,16 @@ fun SearchScreen(
                 query.isBlank() -> IdleContent(
                     recents = recents,
                     onRecentClick = { recent -> vm.setQuery(recent) },
+                    onClearRecents = {
+                        recents.clear()
+                        ir.pinbom.app.data.RecentSearches.save(context, emptyList())
+                    },
+                    tags = tags,
+                    onTagClick = { tag -> vm.setQuery(tag) },
+                    suggestions = suggestions,
+                    baseUrl = session.baseUrl,
+                    onOpenUser = { nav.navigate(Routes.profile(it)) },
+                    onFollow = vm::followSuggestion,
                 )
 
                 type == TYPE_PINS -> PinResults(
@@ -196,28 +211,133 @@ private fun ResultChips(selected: String, onSelect: (String) -> Unit) {
 private fun IdleContent(
     recents: List<String>,
     onRecentClick: (String) -> Unit,
+    onClearRecents: () -> Unit,
+    tags: List<String>,
+    onTagClick: (String) -> Unit,
+    suggestions: List<ir.pinbom.app.ui.SuggestedUser>,
+    baseUrl: String,
+    onOpenUser: (String) -> Unit,
+    onFollow: (Long) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        if (recents.isNotEmpty()) {
-            SectionHeader(title = stringResource(R.string.search_recent_title))
-            PinBomChipRow(
-                labels = recents,
-                selectedIndex = -1,
-                onSelect = { index -> recents.getOrNull(index)?.let(onRecentClick) },
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(
-                    start = Dimens.screen,
-                    end = Dimens.screen,
-                    top = Dimens.xs,
-                    bottom = Dimens.sm,
-                ),
-            )
-        }
+    val chipPadding = PaddingValues(
+        start = Dimens.screen,
+        end = Dimens.screen,
+        top = Dimens.xs,
+        bottom = Dimens.sm,
+    )
+    val nothing = recents.isEmpty() && tags.isEmpty() && suggestions.isEmpty()
+    if (nothing) {
         PullableCenter {
             EmptyState(
                 title = stringResource(R.string.search_idle_title),
                 description = stringResource(R.string.search_idle_body),
                 icon = Icons.Outlined.Search,
+            )
+        }
+        return
+    }
+    androidx.compose.foundation.layout.Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+    ) {
+        if (recents.isNotEmpty()) {
+            SectionHeader(
+                title = stringResource(R.string.search_recent_title),
+                action = {
+                    ir.pinbom.app.ui.components.TextPillButton(
+                        text = stringResource(R.string.search_clear),
+                        onClick = onClearRecents,
+                    )
+                },
+            )
+            PinBomChipRow(
+                labels = recents,
+                selectedIndex = -1,
+                onSelect = { index -> recents.getOrNull(index)?.let(onRecentClick) },
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = chipPadding,
+            )
+        }
+        if (tags.isNotEmpty()) {
+            SectionHeader(title = stringResource(R.string.search_trending_tags))
+            PinBomChipRow(
+                labels = tags.map { "#$it" },
+                selectedIndex = -1,
+                onSelect = { index -> tags.getOrNull(index)?.let(onTagClick) },
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = chipPadding,
+            )
+        }
+        if (suggestions.isNotEmpty()) {
+            SectionHeader(title = stringResource(R.string.search_suggested_people))
+            suggestions.forEach { item ->
+                SuggestionRow(
+                    item = item,
+                    baseUrl = baseUrl,
+                    onOpen = { onOpenUser(item.profile.username) },
+                    onFollow = { onFollow(item.profile.id) },
+                )
+            }
+        }
+        Spacer(Modifier.height(Dimens.navBarSpace))
+    }
+}
+
+@Composable
+private fun SuggestionRow(
+    item: ir.pinbom.app.ui.SuggestedUser,
+    baseUrl: String,
+    onOpen: () -> Unit,
+    onFollow: () -> Unit,
+) {
+    val colors = PinBomTheme.colors
+    val user = item.profile
+    val name = user.display_name.ifBlank { user.username }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .padding(horizontal = Dimens.screen)
+            .pinbomClick(
+                onClick = onOpen,
+                pressedScale = 0.99f,
+                indication = ripple(bounded = true, color = colors.textSecondary),
+                role = Role.Button,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Avatar(name = name, url = user.avatar_url.ifBlank { null }, baseUrl = baseUrl, size = 44.dp)
+        Spacer(Modifier.width(Dimens.md))
+        Column(Modifier.weight(1f)) {
+            ContentText(
+                text = name,
+                style = PinBomText.title,
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            ContentText(
+                text = "@${user.username}",
+                style = PinBomText.caption,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(Dimens.sm))
+        if (item.followed) {
+            ir.pinbom.app.ui.components.SecondaryPillButton(
+                text = stringResource(R.string.action_following),
+                onClick = {},
+                enabled = false,
+                size = ir.pinbom.app.ui.components.PillButtonSize.Small,
+            )
+        } else {
+            ir.pinbom.app.ui.components.PrimaryPillButton(
+                text = stringResource(R.string.action_follow),
+                onClick = onFollow,
+                size = ir.pinbom.app.ui.components.PillButtonSize.Small,
             )
         }
     }

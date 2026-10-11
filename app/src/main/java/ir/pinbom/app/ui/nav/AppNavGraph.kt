@@ -23,11 +23,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.weight
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.launch
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,8 +102,11 @@ import kotlin.math.roundToInt
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** Tab switches: out fast, in settled — 220ms end to end. */
-private const val TAB_OUT_MS = 90
-private const val TAB_IN_MS = 220
+private const val TAB_OUT_MS = 140
+private const val TAB_IN_MS = 300
+
+/** A tab slides this fraction of the width: enough to read as direction, cheap to draw. */
+private const val TAB_TRAVEL = 0.16f
 
 /** A pushed screen travels 12% of the window; the one behind steps back 6%. */
 private const val PUSH_TRAVEL = 0.12f
@@ -181,6 +198,20 @@ private fun AppNavShell(
 
     val reduce = reduceMotion()
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+
+    /* While a finger is down the screen follows it (damped, so it reads as
+     * “pulling” rather than “moving”). Read only inside graphicsLayer, so a
+     * drag redraws one layer and recomposes nothing. On release it springs home. */
+    val dragPx = remember { mutableFloatStateOf(0f) }
+    val dragScope = rememberCoroutineScope()
+    fun settleDrag() {
+        dragScope.launch {
+            Animatable(dragPx.floatValue).animateTo(
+                0f,
+                spring(dampingRatio = 0.82f, stiffness = 380f),
+            ) { dragPx.floatValue = value }
+        }
+    }
     /* +1 when “forward” means “towards the right edge”. */
     val forwardSign = if (rtl) -1f else 1f
 
@@ -192,13 +223,25 @@ private fun AppNavShell(
 
     /* ── The four motions ─────────────────────────────────────────────────── */
 
-    /* Siblings: lightweight fade-through; large feed grids are not scaled. */
-    val tabIn: EnterTransition = fadeIn(
-        animationSpec = tween(durationMillis = TAB_IN_MS, easing = Motion.standard),
-    )
-    val tabOut: ExitTransition = fadeOut(
-        animationSpec = tween(durationMillis = TAB_OUT_MS, easing = Motion.standard),
-    )
+    /* Siblings: a short directional slide + fade. The direction follows the tab
+     * order (and flips in RTL) so swiping and tapping feel like moving along a
+     * strip. Only translation and alpha animate — both are layer-only, so the
+     * feed grid is never re-measured while it moves. */
+    fun tabDir(from: String?, to: String?): Int {
+        val a = Tabs.indexOfFirst { it.route == from }
+        val b = Tabs.indexOfFirst { it.route == to }
+        if (a < 0 || b < 0 || a == b) return 0
+        val logical = if (b > a) 1 else -1
+        return if (rtl) -logical else logical
+    }
+    fun tabIn(dir: Int): EnterTransition = slideInHorizontally(
+        animationSpec = tween(durationMillis = TAB_IN_MS, easing = Motion.emphasized),
+        initialOffsetX = { (it * TAB_TRAVEL * dir).roundToInt() },
+    ) + fadeIn(animationSpec = tween(durationMillis = TAB_IN_MS - 60, easing = Motion.standard))
+    fun tabOut(dir: Int): ExitTransition = slideOutHorizontally(
+        animationSpec = tween(durationMillis = TAB_IN_MS, easing = Motion.emphasized),
+        targetOffsetX = { (-it * TAB_TRAVEL * dir).roundToInt() },
+    ) + fadeOut(animationSpec = tween(durationMillis = TAB_OUT_MS, easing = Motion.standard))
 
     /* A push: forward 12%, fade in; the screen behind steps back 6% and dims. */
     val pushIn: EnterTransition = slideInHorizontally(
@@ -287,31 +330,24 @@ private fun AppNavShell(
              * navigation-bar padding, and inside those insets the system bar
              * would be counted twice. */
             Box(
-                Modifier.weight(1f).fillMaxHeight().pointerInput(currentRoute, shellVisible, rtl) {
-                    if (shellVisible) {
-                        var dragDistance = 0f
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, amount ->
-                                dragDistance += amount
-                                if (kotlin.math.abs(dragDistance) > size.width * 0.10f) change.consume()
-                            },
-                            onDragEnd = {
-                                val threshold = size.width * 0.18f
-                                if (kotlin.math.abs(dragDistance) >= threshold) {
-                                    val currentIndex = Tabs.indexOfFirst { it.route == currentRoute }
-                                    if (currentIndex >= 0) {
-                                        val physicalStep = if (dragDistance < 0f) 1 else -1
-                                        val logicalStep = if (rtl) -physicalStep else physicalStep
-                                        val nextIndex = (currentIndex + logicalStep).coerceIn(0, Tabs.lastIndex)
-                                        if (nextIndex != currentIndex) open(Tabs[nextIndex].route)
-                                    }
-                                }
-                                dragDistance = 0f
-                            },
-                            onDragCancel = { dragDistance = 0f },
-                        )
-                    }
-                },
+                Modifier.weight(1f).fillMaxHeight().tabSwipe(
+                    enabled = shellVisible && !reduce,
+                    onDrag = { total ->
+                        val idx = Tabs.indexOfFirst { it.route == currentRoute }
+                        val logical = if (rtl) total else -total   // >0 → towards next tab
+                        val atEdge = (logical > 0f && idx == Tabs.lastIndex) || (logical < 0f && idx == 0)
+                        dragPx.floatValue = total * (if (atEdge) 0.12f else 0.38f)
+                    },
+                    onSettle = { settleDrag() },
+                    onSwipe = { physicalStep ->
+                        val currentIndex = Tabs.indexOfFirst { it.route == currentRoute }
+                        if (currentIndex >= 0) {
+                            val logicalStep = if (rtl) -physicalStep else physicalStep
+                            val nextIndex = (currentIndex + logicalStep).coerceIn(0, Tabs.lastIndex)
+                            if (nextIndex != currentIndex) open(Tabs[nextIndex].route)
+                        }
+                    },
+                ),
             ) {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -331,11 +367,13 @@ private fun AppNavShell(
                             startDestination = Destination.Home.route,
                             modifier = Modifier
                                 .padding(innerPadding)
-                                .fillMaxSize(),
+                                .fillMaxSize()
+                                .graphicsLayer { translationX = dragPx.floatValue },
                             enterTransition = {
                                 when {
                                     reduce -> EnterTransition.None
-                                    isTabRoute(targetState.destination.route) -> tabIn
+                                    isTabRoute(targetState.destination.route) && isTabRoute(initialState.destination.route) ->
+                                        tabIn(tabDir(initialState.destination.route, targetState.destination.route))
                                     targetState.destination.route == Destination.Create.route -> createIn
                                     else -> pushIn
                                 }
@@ -343,21 +381,24 @@ private fun AppNavShell(
                             exitTransition = {
                                 when {
                                     reduce -> ExitTransition.None
-                                    isTabRoute(targetState.destination.route) -> tabOut
+                                    isTabRoute(targetState.destination.route) && isTabRoute(initialState.destination.route) ->
+                                        tabOut(tabDir(initialState.destination.route, targetState.destination.route))
                                     else -> pushBack
                                 }
                             },
                             popEnterTransition = {
                                 when {
                                     reduce -> EnterTransition.None
-                                    isTabRoute(initialState.destination.route) -> tabIn
+                                    isTabRoute(initialState.destination.route) && isTabRoute(targetState.destination.route) ->
+                                        tabIn(tabDir(initialState.destination.route, targetState.destination.route))
                                     else -> popBackIn
                                 }
                             },
                             popExitTransition = {
                                 when {
                                     reduce -> ExitTransition.None
-                                    isTabRoute(initialState.destination.route) -> tabOut
+                                    isTabRoute(initialState.destination.route) && isTabRoute(targetState.destination.route) ->
+                                        tabOut(tabDir(initialState.destination.route, targetState.destination.route))
                                     initialState.destination.route == Destination.Create.route -> createOut
                                     else -> popOut
                                 }
@@ -510,4 +551,63 @@ private fun BarReveal(
     content: @Composable () -> Unit,
 ) {
     AnimatedVisibility(visible = visible, modifier = modifier, enter = enter, exit = exit) { content() }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ *  Tab swipe
+ *  Watches on the *Initial* pass and never consumes anything until the gesture
+ *  is clearly horizontal (touch slop reached, |dx| > 1.5·|dy|), so vertical
+ *  scrolling of the feed is never delayed or stolen. Commit is by distance
+ *  *or* fling velocity — a quick flick is enough. The pointer block is keyed
+ *  on `enabled` only; the callback is read through rememberUpdatedState, so a
+ *  tab change no longer tears the gesture detector down.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+@Composable
+private fun Modifier.tabSwipe(
+    enabled: Boolean,
+    onDrag: (total: Float) -> Unit,
+    onSettle: () -> Unit,
+    onSwipe: (physicalStep: Int) -> Unit,
+): Modifier {
+    val latest by rememberUpdatedState(onSwipe)
+    val latestDrag by rememberUpdatedState(onDrag)
+    val latestSettle by rememberUpdatedState(onSettle)
+    val viewConfig = LocalViewConfiguration.current
+    return this.pointerInput(enabled) {
+        if (!enabled) return@pointerInput
+        val commitDistance = size.width * 0.14f
+        val commitVelocity = 900f // px/s
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            val tracker = VelocityTracker()
+            tracker.addPosition(down.uptimeMillis, down.position)
+            var total = 0f
+            var vertical = 0f
+            val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                // Only claim the gesture if it is mostly horizontal.
+                val dy = kotlin.math.abs(change.position.y - down.position.y)
+                if (dy < kotlin.math.abs(change.position.x - down.position.x) / 1.5f) {
+                    change.consume()
+                    total += over
+                } else {
+                    vertical = dy
+                }
+            }
+            if (slop == null || vertical > 0f && total == 0f) return@awaitEachGesture
+            tracker.addPosition(slop.uptimeMillis, slop.position)
+            latestDrag(total)
+            horizontalDrag(slop.id) { change ->
+                total += change.positionChange().x
+                latestDrag(total)
+                tracker.addPosition(change.uptimeMillis, change.position)
+                change.consume()
+            }
+            val vx = tracker.calculateVelocity().x
+            val committed = kotlin.math.abs(total) >= commitDistance ||
+                (kotlin.math.abs(vx) >= commitVelocity && kotlin.math.abs(total) > viewConfig.touchSlop * 2)
+            if (committed) latest(if (total < 0f) 1 else -1)
+            latestSettle()
+        }
+    }
 }

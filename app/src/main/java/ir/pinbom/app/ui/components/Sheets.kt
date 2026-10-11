@@ -106,6 +106,8 @@ fun SheetHeader(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    /** True when [title] is user content (a pin title): it aligns by its own script. */
+    contentDirection: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = PinBomTheme.colors
@@ -116,7 +118,16 @@ fun SheetHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(text = title, style = PinBomText.title, color = colors.textPrimary)
+            if (contentDirection) {
+                ContentText(
+                    text = title,
+                    style = PinBomText.title,
+                    color = colors.textPrimary,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                Text(text = title, style = PinBomText.title, color = colors.textPrimary)
+            }
             if (subtitle != null) {
                 Text(text = subtitle, style = PinBomText.caption, color = colors.textSecondary)
             }

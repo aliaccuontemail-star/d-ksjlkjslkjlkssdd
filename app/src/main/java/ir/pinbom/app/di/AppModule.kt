@@ -13,5 +13,5 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule{
- @Provides @Singleton fun db(@ApplicationContext c:Context):LocalDb=Room.databaseBuilder(c,LocalDb::class.java,"pinbom-cache.db").build()
+ @Provides @Singleton fun db(@ApplicationContext c:Context):LocalDb=Room.databaseBuilder(c,LocalDb::class.java,"pinbom-cache.db").fallbackToDestructiveMigration().build()
 }
